@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="DaniFit">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>DaniFit</title>
+<style>
+:root{--fg:#161616;--mut:#777;--line:#e9e9e9;--soft:#f5f5f5}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0}
+body{font:16px/1.4 -apple-system,system-ui,"Helvetica Neue",sans-serif;background:#fff;color:var(--fg)}
+#app{max-width:520px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 16px) 18px calc(92px + env(safe-area-inset-bottom))}
+h1{font-size:28px;margin:6px 0 2px;letter-spacing:-.5px;font-weight:700}
+h2{font-size:14px;color:var(--mut);font-weight:500;margin:22px 0 8px}
+.sub{color:var(--mut);font-size:14px}
+.card{border:1px solid var(--line);border-radius:14px;padding:14px;margin:8px 0}
+.row{display:flex;align-items:center;gap:10px;justify-content:space-between}
+button{font:inherit;border:0;border-radius:12px;padding:12px 16px;background:var(--fg);color:#fff}
+button.s{background:var(--soft);color:var(--fg)}
+button.x{background:none;color:#b3392b;padding:6px 10px}
+button.full,.full{width:100%}
+button.l{text-align:left;margin:4px 0}
+input,select{font:inherit;border:1px solid var(--line);border-radius:10px;padding:10px;min-width:0;width:100%;background:#fff;color:var(--fg)}
+.file{display:block;text-align:center;padding:12px;border-radius:12px;background:var(--soft);margin-top:8px}
+.reps{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.reps input{width:56px;text-align:center}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;padding:13px 0 11px;font-size:12px}
+nav button.on{color:var(--fg);font-weight:700}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.cal button{background:none;color:var(--fg);padding:9px 0;position:relative;border-radius:10px}
+.cal button.on{background:var(--soft);font-weight:700}
+.cal button.t{outline:1px solid var(--fg)}
+.cal i{position:absolute;left:50%;bottom:3px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--fg)}
+.ph{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.ph img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;display:block}
+.ph .sel img{outline:3px solid var(--fg)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td{padding:7px 4px;border-bottom:1px solid var(--line)}
+svg{width:100%;height:auto}
+</style></head><body>
+<main id="app"></main><nav></nav>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
+const iso=d=>{const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};
+const today=()=>iso(new Date());
+const fmt=d=>new Date(d+'T12:00').toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'});
+const DB={open(){return new Promise((res,rej)=>{const r=indexedDB.open('danifit',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})},
+async get(){const db=await this.open();return new Promise(res=>{const q=db.transaction('kv').objectStore('kv').get('state');q.onsuccess=()=>res(q.result);q.onerror=()=>res(null)})},
+async set(v){const db=await this.open();return new Promise(res=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,'state');t.oncomplete=()=>res()})}};
+let S={routines:[],sessions:[],weights:[],photos:[],lastBackup:null},W=null,PERSIST=false;
+const V={tab:'home',sub:null,id:null,m:new Date(),day:today(),ex:null,wm:'w',sel:[]};
+const save=()=>DB.set(S);
+const sorted=()=>[...S.sessions].sort((a,b)=>(b.date+b.ts).localeCompare(a.date+a.ts));
+const last=(n,x)=>{for(const s of sorted()){if(s.id===x)continue;const e=s.exs.find(e=>e.name.toLowerCase()===n.toLowerCase());if(e)return{...e,date:s.date}}};
+const cur=()=>S.routines.find(r=>r.id===V.id);
+const TABS=[['home','Inicio'],['routines','Rutinas'],['cal','Calendario'],['prog','Progreso'],['more','Más']];
+
+function render(){
+ $('#app').innerHTML=W?workout():({home,routines,cal,prog,more}[V.tab])();
+ $('nav').innerHTML=TABS.map(([k,l])=>`<button data-a="tab" data-k="${k}" class="${V.tab===k&&!W?'on':''}">${l}</button>`).join('');
+}
+function home(){
+ const l=sorted()[0],old=(!S.lastBackup||Date.now()-S.lastBackup>30*864e5)&&(S.sessions.length||S.weights.length);
+ return `<h1>DaniFit</h1><div class="sub">Tu entrenamiento. Tu evolución</div><h2>Entrenar hoy</h2>`+
+ (S.routines.length?S.routines.map(r=>`<button class="full s l" data-a="start" data-id="${r.id}">${esc(r.name)} <span class="sub">${r.exercises.length} ejercicios</span></button>`).join(''):`<div class="card sub">Crea tu primera rutina en la pestaña Rutinas.</div>`)+
+ (l?`<h2>Última sesión</h2><div class="card"><b>${esc(l.routineName)}</b><div class="sub">${fmt(l.date)}</div></div>`:'')+
+ `<h2>Recordatorios</h2><div class="card sub">Pesaje: lunes a las 08:00. Fotos: día 1 a las 08:00. Se configuran en Más, Configuración.</div>`+
+ (old?`<div class="card"><b>Haz una copia de seguridad</b><div class="sub">${S.lastBackup?'Han pasado más de 30 días desde la última.':'Aún no has exportado ninguna.'}</div><button class="s" style="margin-top:8px" data-a="export">Exportar copia</button></div>`:'');
+}
+function begin(rid,date){const r=S.routines.find(x=>x.id===rid);
+ W={id:null,date,rid,name:r.name,exs:r.exercises.map(e=>{const l=last(e.name);return{name:e.name,weight:l?l.weight:'',reps:Array(l?l.reps.length:3).fill('')}})};render()}
+function workout(){
+ return `<div class="row"><button class="s" data-a="cancel">Atrás</button><input type="date" data-w="date" value="${W.date}" style="width:auto"></div><h1>${esc(W.name)}</h1>`+
+ W.exs.map((e,i)=>{const l=last(e.name,W.id);return `<div class="card"><b>${esc(e.name)}</b><div class="sub">${l?`Última vez (${fmt(l.date)}): ${l.weight} kg, ${l.reps.join('/')}`:'Sin registros previos'}</div>
+ <div class="row" style="margin-top:10px"><span>Peso (kg)</span><input data-w="weight" data-i="${i}" type="number" inputmode="decimal" step="0.5" value="${e.weight}" style="width:110px;text-align:center"></div>
+ <div class="reps">${e.reps.map((r,k)=>`<input data-w="rep" data-i="${i}" data-k="${k}" type="number" inputmode="numeric" placeholder="S${k+1}" value="${r}">`).join('')}<button class="s" data-a="addset" data-i="${i}">+ serie</button></div></div>`}).join('')+
+ `<button class="full" style="margin-top:8px" data-a="finish">Guardar sesión</button>`+(W.id?`<button class="full x" data-a="delsess">Eliminar sesión</button>`:'');
+}
+function routines(){
+ const r=cur();
+ if(r)return `<button class="s" data-a="back">Rutinas</button><h1>${esc(r.name)}</h1><button class="s" data-a="rename">Renombrar</button>`+
+ r.exercises.map((e,i)=>`<div class="card row"><span>${esc(e.name)}</span><span><button class="s" data-a="up" data-i="${i}">Subir</button><button class="x" data-a="delex" data-i="${i}">Quitar</button></span></div>`).join('')+
+ `<button class="full" style="margin-top:8px" data-a="addex">Añadir ejercicio</button><button class="full x" data-a="delr">Eliminar rutina</button><div class="sub">Quitar ejercicios o rutinas no borra el historial.</div>`;
+ return `<h1>Mis rutinas</h1>`+S.routines.map(r=>`<button class="full s l" data-a="openr" data-id="${r.id}">${esc(r.name)} <span class="sub">${r.exercises.length} ejercicios</span></button>`).join('')+`<button class="full" style="margin-top:10px" data-a="addr">Nueva rutina</button>`;
+}
+function cal(){
+ const m=V.m,y=m.getFullYear(),mo=m.getMonth(),first=(new Date(y,mo,1).getDay()+6)%7,n=new Date(y,mo+1,0).getDate();
+ const has=new Set(S.sessions.map(s=>s.date));let c='';
+ for(let i=0;i<first;i++)c+='<span></span>';
+ for(let d=1;d<=n;d++){const k=iso(new Date(y,mo,d));c+=`<button data-a="day" data-d="${k}" class="${k===V.day?'on':''} ${k===today()?'t':''}">${d}${has.has(k)?'<i></i>':''}</button>`}
+ const ss=S.sessions.filter(s=>s.date===V.day);
+ return `<div class="row"><button class="s" data-a="mon" data-n="-1">‹</button><h1 style="font-size:20px;text-transform:capitalize">${m.toLocaleDateString('es-ES',{month:'long',year:'numeric'})}</h1><button class="s" data-a="mon" data-n="1">›</button></div>
+ <div class="cal sub" style="margin-top:10px">${'LMXJVSD'.split('').map(x=>`<span>${x}</span>`).join('')}</div><div class="cal">${c}</div><h2>${fmt(V.day)}</h2>`+
+ (ss.map(s=>`<div class="card" data-a="edit" data-id="${s.id}"><b>${esc(s.routineName)}</b><div class="sub">${s.exs.map(e=>`${esc(e.name)}: ${e.weight} kg, ${e.reps.join('/')}`).join('<br>')}</div></div>`).join('')||'<div class="sub">Sin entrenamiento este día.</div>')+
+ `<h2>Registrar entrenamiento este día</h2>`+(S.routines.map(r=>`<button class="s" style="margin:3px 3px 3px 0" data-a="start" data-id="${r.id}" data-d="${V.day}">${esc(r.name)}</button>`).join('')||'<div class="sub">Primero crea una rutina.</div>');
+}
+function chart(pts,u){
+ if(pts.length<2)return `<div class="sub">${pts.length?'Un solo registro por ahora.':'Sin datos.'}</div>`;
+ const w=320,h=130,p=26,ys=pts.map(q=>q.y),mn=Math.min(...ys),mx=Math.max(...ys),r=mx-mn||1;
+ const X=i=>p+i*(w-2*p)/(pts.length-1),Y=y=>h-p-(y-mn)/r*(h-2*p);
+ return `<svg viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="#161616" stroke-width="2" points="${pts.map((q,i)=>X(i)+','+Y(q.y)).join(' ')}"/>${pts.map((q,i)=>`<circle cx="${X(i)}" cy="${Y(q.y)}" r="3" fill="#161616"/>`).join('')}<g font-size="10" fill="#777"><text x="${p}" y="12">${mx}${u}</text><text x="${p}" y="${h-4}">${mn}${u}</text></g></svg><div class="sub">${pts[0].x} a ${pts[pts.length-1].x}</div>`;
+}
+function prog(){
+ const names=[...new Set(S.sessions.flatMap(s=>s.exs.map(e=>e.name)))].sort();
+ if(!names.length)return `<h1>Progreso</h1><div class="sub">Aún no hay sesiones. Registra la primera y aquí verás tu evolución.</div>`;
+ const n=names.includes(V.ex)?V.ex:names[0];
+ const h=S.sessions.filter(s=>s.exs.some(e=>e.name===n)).sort((a,b)=>a.date.localeCompare(b.date)||a.ts-b.ts).map(s=>({d:s.date,e:s.exs.find(e=>e.name===n)}));
+ return `<h1>Progreso</h1><select data-c="ex">${names.map(x=>`<option ${x===n?'selected':''}>${esc(x)}</option>`).join('')}</select>
+ <h2>Peso utilizado</h2>${chart(h.map(q=>({x:fmt(q.d),y:q.e.weight})),' kg')}
+ <h2>Repeticiones totales por sesión</h2>${chart(h.map(q=>({x:fmt(q.d),y:q.e.reps.reduce((a,b)=>a+b,0)})),'')}
+ <h2>Historial</h2><table>${[...h].reverse().map(q=>`<tr><td>${fmt(q.d)}</td><td>${q.e.weight} kg</td><td>${q.e.reps.join('/')}</td></tr>`).join('')}</table>`;
+}
+function more(){
+ const b=`<button class="s" data-a="sub" data-k="">Más</button>`;
+ if(V.sub==='weight')return b+weightV();if(V.sub==='photos')return b+photosV();if(V.sub==='set')return b+setV();
+ return `<h1>Más</h1>`+[['weight','Peso corporal'],['photos','Fotografías'],['set','Configuración']].map(([k,l])=>`<button class="full s l" data-a="sub" data-k="${k}">${l}</button>`).join('');
+}
+function weightV(){
+ const ws=[...S.weights].sort((a,b)=>a.date.localeCompare(b.date));
+ let pts=ws.map(w=>({x:fmt(w.date),y:w.kg}));
+ if(V.wm==='m'){const g={};ws.forEach(w=>{(g[w.date.slice(0,7)]??=[]).push(w.kg)});pts=Object.entries(g).map(([k,a])=>({x:k,y:+(a.reduce((s,v)=>s+v,0)/a.length).toFixed(1)}))}
+ return `<h1>Peso corporal</h1><div class="row"><input id="wk" type="number" inputmode="decimal" step="0.1" placeholder="kg"><input id="wd" type="date" value="${today()}"><button data-a="addw">Añadir</button></div>
+ <div class="row" style="margin:14px 0 8px"><button class="${V.wm==='w'?'':'s'} full" data-a="wm" data-k="w">Semanal</button><button class="${V.wm==='m'?'':'s'} full" data-a="wm" data-k="m">Media mensual</button></div>${chart(pts,' kg')}<h2>Pesajes</h2>`+
+ [...ws].reverse().map(w=>`<div class="card row"><span>${fmt(w.date)}</span><span>${w.kg} kg <button class="x" data-a="delw" data-id="${w.id}">Quitar</button></span></div>`).join('');
+}
+function photosV(){
+ const ps=[...S.photos].sort((a,b)=>b.date.localeCompare(a.date)),sel=ps.filter(p=>V.sel.includes(p.id));
+ return `<h1>Fotografías</h1><label class="file">Añadir foto<input type="file" accept="image/*" data-c="photo" hidden></label>`+
+ (sel.length?`<h2>Comparar</h2><div class="ph">${sel.map(p=>`<div><img src="${p.img}"><div class="sub">${fmt(p.date)}</div></div>`).join('')}</div>${sel.length===1?`<button class="x" data-a="delp" data-id="${sel[0].id}">Eliminar esta foto</button>`:''}`:'')+
+ `<h2>Toca dos fotos para compararlas</h2><div class="ph">${ps.map(p=>`<div class="${V.sel.includes(p.id)?'sel':''}" data-a="selp" data-id="${p.id}"><img src="${p.img}" loading="lazy"><div class="sub">${fmt(p.date)}</div></div>`).join('')}</div>`;
+}
+function setV(){
+ return `<h1>Configuración</h1><h2>Copia de seguridad</h2><div class="card"><div class="sub">Última copia: ${S.lastBackup?fmt(iso(S.lastBackup)):'nunca'}. Si se borran los datos de Safari o pierdes el iPhone, solo podrás recuperar lo que hayas exportado (incluye las fotos).</div><button class="full" style="margin-top:8px" data-a="export">Exportar copia</button><label class="file">Restaurar copia<input type="file" accept=".json,application/json" data-c="import" hidden></label></div>
+ <h2>Recordatorios</h2><div class="card sub">Lo más fiable es la app Recordatorios de Apple, con avisos recurrentes:<br>Pesarme: semanal, lunes 08:00.<br>Foto de progreso: mensual, día 1 a las 08:00.<br>Exportar copia: mensual.</div>
+ <h2>Almacenamiento</h2><div class="card sub">${PERSIST?'Protegido contra borrado automático del navegador.':'Sin protección garantizada. Añade DaniFit a la pantalla de inicio y expórtala con frecuencia.'}</div>`;
+}
+async function exp(){
+ const f=new File([JSON.stringify({app:'DaniFit',v:1,data:S})],`danifit-${today()}.json`,{type:'application/json'});
+ try{if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f]});else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click()}
+ S.lastBackup=Date.now();save();render()}catch(e){}
+}
+function finish(){
+ const exs=W.exs.map(e=>({name:e.name,weight:parseFloat(e.weight)||0,reps:e.reps.filter(r=>r!=='').map(Number)})).filter(e=>e.reps.length);
+ if(!exs.length)return alert('Anota las repeticiones de al menos una serie.');
+ const s={id:W.id||uid(),ts:Date.now(),date:W.date,routineId:W.rid,routineName:W.name,exs};
+ S.sessions=S.sessions.filter(x=>x.id!==s.id).concat(s);save();
+ V.tab='cal';V.day=s.date;V.m=new Date(s.date+'T12:00');W=null;render();
+}
+const A={
+ tab:d=>{V.tab=d.k;V.sub=null;V.id=null;W=null;render()},
+ start:d=>begin(d.id,d.d||today()),
+ cancel:()=>{W=null;render()},
+ addset:d=>{W.exs[+d.i].reps.push('');render()},
+ finish,
+ delsess:()=>{if(confirm('¿Eliminar esta sesión?')){S.sessions=S.sessions.filter(s=>s.id!==W.id);save();W=null;render()}},
+ openr:d=>{V.id=d.id;render()},back:()=>{V.id=null;render()},
+ addr:()=>{const n=prompt('Nombre de la rutina');if(n&&n.trim()){const r={id:uid(),name:n.trim(),exercises:[]};S.routines.push(r);save();V.id=r.id;render()}},
+ rename:()=>{const r=cur(),n=prompt('Nuevo nombre',r.name);if(n&&n.trim()){r.name=n.trim();save();render()}},
+ addex:()=>{const n=prompt('Nombre del ejercicio');if(n&&n.trim()){cur().exercises.push({name:n.trim()});save();render()}},
+ delex:d=>{cur().exercises.splice(+d.i,1);save();render()},
+ up:d=>{const a=cur().exercises,i=+d.i;if(i>0){[a[i-1],a[i]]=[a[i],a[i-1]];save();render()}},
+ delr:()=>{if(confirm('¿Eliminar la rutina? El historial se conserva.')){S.routines=S.routines.filter(r=>r.id!==V.id);V.id=null;save();render()}},
+ day:d=>{V.day=d.d;render()},
+ mon:d=>{V.m=new Date(V.m.getFullYear(),V.m.getMonth()+ +d.n,1);render()},
+ edit:d=>{const s=S.sessions.find(x=>x.id===d.id);W={id:s.id,date:s.date,rid:s.routineId,name:s.routineName,exs:s.exs.map(e=>({name:e.name,weight:e.weight,reps:e.reps.map(String)}))};render()},
+ sub:d=>{V.sub=d.k||null;render()},
+ wm:d=>{V.wm=d.k;render()},
+ addw:()=>{const kg=parseFloat($('#wk').value);if(!kg)return;S.weights.push({id:uid(),date:$('#wd').value||today(),kg});save();render()},
+ delw:d=>{S.weights=S.weights.filter(w=>w.id!==d.id);save();render()},
+ selp:d=>{const i=V.sel.indexOf(d.id);if(i>=0)V.sel.splice(i,1);else V.sel=[...V.sel,d.id].slice(-2);render()},
+ delp:d=>{if(confirm('¿Eliminar la foto?')){S.photos=S.photos.filter(p=>p.id!==d.id);V.sel=[];save();render()}},
+ export:exp};
+const C={
+ ex:el=>{V.ex=el.value;render()},
+ photo:el=>{const f=el.files[0];if(!f)return;const im=new Image();im.onload=()=>{const k=Math.min(1,900/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*k;c.height=im.height*k;c.getContext('2d').drawImage(im,0,0,c.width,c.height);S.photos.push({id:uid(),date:today(),img:c.toDataURL('image/jpeg',.8)});save();render()};im.src=URL.createObjectURL(f)},
+ import:async el=>{try{const j=JSON.parse(await el.files[0].text());if(!j.data||!Array.isArray(j.data.routines))throw 0;if(!confirm('Esto reemplazará los datos actuales. ¿Continuar?'))return;S=Object.assign({routines:[],sessions:[],weights:[],photos:[],lastBackup:null},j.data);save();render()}catch(e){alert('El archivo no es una copia válida de DaniFit.')}}};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(b&&A[b.dataset.a])A[b.dataset.a](b.dataset)});
+document.addEventListener('change',e=>{const c=e.target.dataset.c;if(c&&C[c])C[c](e.target)});
+document.addEventListener('input',e=>{const t=e.target,w=t.dataset.w;if(!w||!W)return;const i=+t.dataset.i;
+ if(w==='date')W.date=t.value;else if(w==='weight')W.exs[i].weight=t.value;else if(w==='rep')W.exs[i].reps[+t.dataset.k]=t.value});
+(async()=>{
+ try{const d=await DB.get();if(d)S=Object.assign(S,d)}catch(e){}
+ try{PERSIST=await navigator.storage.persist()}catch(e){}
+ render();
+ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+</script></body></html>
